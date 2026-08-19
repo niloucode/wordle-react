@@ -29,7 +29,7 @@ export function App() {
 				<Card
 					className={
 						(displayText ? "opacity-100 " : "opacity-0 ") +
-						"bg-subtle mx-auto p-2 w-fit"
+						"bg-subtle mx-auto p-2 w-fit uppercase"
 					}
 				>
 					<CardTitle>{displayText}</CardTitle>
@@ -57,7 +57,9 @@ export function App() {
 					</CardHeader>
 					<CardContent>
 						{!pressToggle ? (
-							<LetterBoard onEnd={(msg) => setDisplayText(msg)}></LetterBoard>
+							<LetterBoard
+								passMessage={(msg) => setDisplayText(msg)}
+							></LetterBoard>
 						) : (
 							<PseudoBoard></PseudoBoard>
 						)}
