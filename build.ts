@@ -5,13 +5,12 @@ import tailwind from "bun-plugin-tailwind";
 const outdir = path.join(process.cwd(), "dist");
 await rm(outdir, { recursive: true, force: true });
 
-const entrypoints = [...new Bun.Glob("src/**/*.html").scanSync()];
-
 const result = await Bun.build({
-	entrypoints,
-	outdir,
-	plugins: [tailwind],
+	entrypoints: ["./index.html"],
+	outdir: "./dist",
+	publicPath: "./",
 	minify: true,
+	plugins: [tailwind],
 	target: "browser",
 	sourcemap: "linked",
 	define: {
@@ -19,8 +18,10 @@ const result = await Bun.build({
 	},
 });
 
-for (const output of result.outputs) {
-	console.log(
-		` ${path.relative(process.cwd(), output.path)}  ${(output.size / 1024).toFixed(1)} KB`,
-	);
+if (!result.success) {
+	console.error("Build failed:");
+	for (const log of result.logs) {
+		console.error(log);
+	}
+	process.exit(1);
 }
