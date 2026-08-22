@@ -46,8 +46,8 @@ The content is organized as follows:
 src/
   app/
     app.tsx
+    board.tsx
     frontend.tsx
-    wordle-utils.tsx
   assets/
     5-letter-words.json
     nonwordles.json
@@ -56,6 +56,7 @@ src/
     ui/
       button.tsx
       card.tsx
+      sonner.tsx
   lib/
     utils.ts
   index.css
@@ -76,20 +77,52 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/app/frontend.tsx">
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./app";
-import "@fontsource-variable/inter/wght.css";
+<file path="src/components/ui/sonner.tsx">
+"use client"
 
-const app = (
-	<StrictMode>
-		<App />
-	</StrictMode>
-);
+import {
+  CircleCheckIcon,
+  InfoIcon,
+  Loader2Icon,
+  OctagonXIcon,
+  TriangleAlertIcon,
+} from "lucide-react"
+import { useTheme } from "next-themes"
+import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-const elem = document.getElementById("root")!;
-(import.meta.hot.data.root ??= createRoot(elem)).render(app);
+const Toaster = ({ ...props }: ToasterProps) => {
+  const { theme = "system" } = useTheme()
+
+  return (
+    <Sonner
+      theme={theme as ToasterProps["theme"]}
+      className="toaster group"
+      icons={{
+        success: <CircleCheckIcon className="size-4" />,
+        info: <InfoIcon className="size-4" />,
+        warning: <TriangleAlertIcon className="size-4" />,
+        error: <OctagonXIcon className="size-4" />,
+        loading: <Loader2Icon className="size-4 animate-spin" />,
+      }}
+      style={
+        {
+          "--normal-bg": "var(--popover)",
+          "--normal-text": "var(--popover-foreground)",
+          "--normal-border": "var(--border)",
+          "--border-radius": "var(--radius)",
+        } as React.CSSProperties
+      }
+      toastOptions={{
+        classNames: {
+          toast: "cn-toast w-fit!",
+        },
+      }}
+      {...props}
+    />
+  )
+}
+
+export { Toaster }
 </file>
 
 <file path="src/assets/5-letter-words.json">
@@ -9292,8 +9325,7 @@ export default defineConfig([
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" />
     <title>Wordle</title>
-    <script type="module" src="./src/app/frontend.tsx" async></script>
-    <script type="stylesheet" src="@/index.css"></script>
+    <script type="module" src="./src/app/frontend.tsx"></script>
   </head>
   <body>
     <div id="root"></div>
@@ -9301,19 +9333,445 @@ export default defineConfig([
 </html>
 </file>
 
-<file path="README.md">
-# Wordle Clone
-A wordle clone made in React. This is purely a React practice that I wanted to push out to GitHub. Took me one day, made with 5% AI (Importing Google Fonts in Tailwind skill issue)\
+<file path=".github/workflows/deploy.yml">
+# Simple workflow for deploying static content to GitHub Pages
+name: Deploy static content to Pages
 
-# Tech Stack
-- Bun
-- ShadCN
-- React
-- Tailwind
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ['master']
 
-# How to run
-- `bun install`
-- `bun dev`
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets the GITHUB_TOKEN permissions to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  # Single deploy job since we're just deploying
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install
+      - name: Build
+        run: bun run build
+      - name: Debug dist contents
+        run: ls -la ./dist
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+</file>
+
+<file path="src/app/board.tsx">
+import { Delete, CornerDownLeft } from "lucide-react"
+import type React from "react";
+import { useEffect, useReducer, useState } from "react";
+// To-do: Give source where you got wordles from
+// import NONWORDLES from "@/assets/nonwordles.json";
+import WORDLES from "@/assets/wordles.json";
+import WORDS from "@/assets/5-letter-words.json";
+
+import { Card } from "@/components/ui/card"
+import { getSourceMapsSupport } from "node:module";
+
+// Define types
+
+type State = {
+	type: "type" | "reveal" | "win" | "lose";
+	text: string;
+	guess: string;
+	textPos: number;
+	guessPos: number;
+	keyboard: Array<String>;
+};
+
+type Action = {
+	type: "appendGuess" | "removeGuessEnd" | "appendText" | "checkDone";
+	value?: string;
+};
+
+type Evaluation = "=" | "/" | "X" | "?" | "_";
+
+type LetterEvaluation  = {
+	letter:string,
+	evaluation: Evaluation
+}
+
+
+
+// Set constants
+const COLS = 5;
+const ROWS = 6;
+const CELLS = ROWS * COLS;
+const ANSWER = "gains"
+
+// Join Wordles and Nonwordles for the list of words used in validation
+// const WORDS = [...NONWORDLES, ...WORDLES];
+
+// Pick among the 'Wordles' - these are words known to be answers in Wordle
+// const ANSWER = WORDLES[Math.floor(Math.random() * WORDLES.length)] ?? "";
+
+// A div used to represent a letter
+export function Letter({
+	className,
+	children,
+	...props
+}: React.ComponentProps<"div">) {
+	return (
+		<div
+			className={`flex min-h-12 max-h-12 min-w-10 max-w-10 w-full justify-center 
+		items-center text-2xl font-bold font-sans capitalize 
+		${className}`}
+			{...props}
+		>
+			{children}
+		</div>
+	);
+}
+
+// A div used to represent a key (literally a letter with a border)
+export function Key({
+	className,
+	children,
+	...props
+}: React.ComponentProps<"div">) {
+	return (
+		<Letter
+			className={` border-b-5 border-2 border-foreground/45 ${className}`}
+			{...props}
+		>
+			{children}
+		</Letter>
+	);
+}
+
+// Define the reducer for the useReducer
+function reducer(state: State, action: Action): State {
+	switch (action.type) {
+		case "appendGuess":
+			if (state.type !== "type") return state;
+
+			return {
+				...state,
+				type: "type",
+				guess: state.guess + action.value,
+				guessPos: state.text.length + state.guess.length,
+				textPos: -1
+			};
+
+		case "removeGuessEnd":
+			if (state.type !== "type") return state;
+
+			return { ...state, type: "type", guess: state.guess.slice(0, -1), guessPos: -1 };
+
+		case "appendText":
+			if (state.type !== "reveal" && state.type !== "type") return state;
+
+			return {
+				...state,
+				type: "reveal",
+				text: state.text + "" + state.guess[0],
+				guess: state.guess.slice(1),
+				textPos: Math.floor(state.text.length/COLS),
+				guessPos: -1,
+			};
+
+		case "checkDone":
+			if (state.type !== "reveal") return state;
+
+			// Win/Lose check
+			for (let i = 0; i < ROWS; i++)
+			{
+				if (state.text.slice(Math.floor(i/COLS),Math.floor(i/COLS)+COLS) === ANSWER)
+					return { ...state, type: "win", guessPos: -1 };
+			}
+			if (state.text.length === CELLS)
+				return { ...state, type: "lose", guessPos: -1 };
+
+			return { ...state, type: "type", guess: "" };
+	}
+}
+
+// Render Component
+export function WordleMain({
+	passMessage,
+}: {
+	passMessage: (msg: string) => void;
+}) {
+	const [state, dispatch] = useReducer(reducer, {
+		type: "type",
+		text: "",
+		guess: "",
+		textPos: -1,
+		guessPos: -1,
+		keyboard: Array.from("EEEEEEEEEEEEEEEEEEEEEEEEEE")
+	});
+
+	var evalBoard = evaluateWordleBoard(state.text,state.guess)
+	const [error, setError] = useState(-1);
+
+	function appendLetter(evt: KeyboardEvent) {
+		// Ignore keyboard shortcuts
+		if (evt.ctrlKey || evt.metaKey || evt.altKey) return;
+
+		// Match only single characters
+		if (/^[a-zA-Z]$/.test(evt.key)) {
+			evt.preventDefault();
+			dispatch({ type: "appendGuess", value: evt.key.toLowerCase() });
+			
+		}
+	}
+
+	function revealResult(evt: KeyboardEvent) {
+		evt.preventDefault();
+
+		let wordValid = state.guess.length === COLS && WORDS.includes(state.guess)
+
+		if (wordValid) {			
+			for (let i = 0; i < COLS; i++)
+				dispatch({ type: "appendText" });
+
+			dispatch({ type: "checkDone" });
+		} else {
+			setError(Math.floor((state.text.length+Math.min(state.guess.length+1,5))/ROWS ));
+			setTimeout(() => setError(-1), 100);
+		}
+	}
+
+	useEffect(() => {
+		// Only trigger when the reducer explicitly updates the state to win/lose
+		if (state.type === "win" || state.type === "lose") {
+			passMessage(ANSWER);
+		}
+	}, [state.type, ANSWER]); // Runs whenever state.type changes
+
+	useEffect(() => {
+		function handleKeyDown(evt: KeyboardEvent) {
+			if (evt.key === "Backspace") dispatch({ type: "removeGuessEnd" });
+			else if (evt.key === "Enter") revealResult(evt);
+			else if (state.guess.length < COLS) appendLetter(evt);
+
+			evalBoard = evaluateWordleBoard(state.text,state.guess)
+		}
+
+		document.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			document.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [state, error, state.guess.length,evalBoard]);
+
+	useEffect(()=>{
+		evalBoard = evaluateWordleBoard(state.text,state.guess)
+	},[state])
+
+	function judge (guess:string) {
+		const countAnswer: Record<string, number> = {}
+		const guessArr = Array.from(guess)
+		let legend = Array(COLS)
+			
+		for (const i in Array.from(ANSWER))
+			countAnswer[ANSWER[i]??""] = (countAnswer[ANSWER[i]??""] ?? 0) + 1
+
+		console.log(countAnswer)
+		for (let i = 0; i < guess.length; i++){
+			let ch = guess[i] ?? ""
+			if (guess[i] === ANSWER[i]){
+				countAnswer[ch] = (countAnswer[ch] ?? 0) - 1
+				legend[i] = "="
+			}
+		}
+
+		for (const i in guessArr){
+			let ch = guessArr[i] ?? ""
+			if (legend[i] == "=")
+				continue
+			else if ((countAnswer[ch]??0) > 0){
+						legend[i] = '/'
+						countAnswer[ch] = (countAnswer[ch]??0) - 1
+			}
+			else
+				legend[i]="X"
+		}
+
+		console.log(legend)
+		return legend
+	}
+
+	function evaluateWordleBoard(text:string,guess:string){
+		const wordGrid: LetterEvaluation[][] = Array.from(
+			{length: ROWS}, () => []
+		);
+
+		for (let i = 0; i < Math.floor(text.length/COLS); i++) {
+			let currentLetters = text.slice(i*COLS,i*COLS+COLS)
+			let currentEvals = judge(currentLetters)
+			console.log(i+": "+currentEvals+" "+currentLetters)
+
+			for (let j = 0; j < COLS; j++) {
+				wordGrid[i]!.push(
+					{ letter: currentLetters[j]??"", evaluation: currentEvals[j]}
+				);
+			}
+		}
+
+		let rowIdx = Math.floor(text.length/COLS);
+		if (rowIdx < ROWS)
+			for (let i = 0; i < COLS; i++)
+			{
+
+				if (i<guess.length)
+				{
+					let currentLetter = guess[i] ?? "";
+					wordGrid[rowIdx]!.push(
+						{ letter: currentLetter, evaluation: (i < guess.length -1)?
+							'_':'?' }
+					);
+				}
+				else
+					wordGrid[Math.ceil(text.length/COLS)]!.push(
+						{ letter: "", evaluation: "_" }
+					);
+			}
+		
+		rowIdx = Math.floor(text.length/COLS)+1;
+
+		for (let i = rowIdx; i < ROWS; i++)
+		{
+			wordGrid[i] = Array.from({length:COLS},()=>({ letter: "", evaluation: "_" }));
+		}
+
+		return wordGrid
+	}
+
+	return <>
+			<WordleLetterBoard key={state.guessPos} evals={evalBoard} pop={state.guessPos} reveal={state.textPos} error={error}/>
+			{/* <WordleKeyboard/> */}
+	</>
+}
+
+export function PseudoBoard() {
+	return (
+		<div className="grid grid-cols-5 gap-2">
+			{Array.from({ length: CELLS }, (_, i) => (
+				<Letter key={i} className="bg-background" />
+			))}
+		</div>
+	);
+}
+
+interface WordleLetterBoardProps{
+evals?:LetterEvaluation[][],pop:number,reveal:number,error:number
+}
+
+const sbStatusMap: Record<Evaluation, string> = {
+	"=": "correct",
+	"/": "included",
+	"X": "notincluded",
+	"?": "background",
+	"_": "background",
+};
+
+export function WordleLetterBoard({evals,pop,reveal,error}:WordleLetterBoardProps){
+
+	return (
+		<Card>
+			<div className="grid grid-rows-6 gap-2 p-2 ">
+			{/* Render existing placed letters */}
+			{evals ? Array.from(evals).map((c, i) => {
+				return <div key={"sample_key"+i+c} className={"flex gap-2 "+(error==i?"animate-shake":"")}>
+					{c.map((d,j)=> {
+						let flipDelay = ` animate-flip-reveal`
+						let revealCell = d.evaluation != "_" && d.evaluation != "?" && reveal == i
+						return (
+							<Letter
+								key={i*COLS+j}
+								className={(pop === i*COLS+j ? 'animate-pop-in ':"")+
+									(revealCell ? flipDelay : ` bg-${sbStatusMap[d.evaluation]} `)}
+								style={{animationDelay: (revealCell) ? `${j*80}ms`:"", "--reveal-color": `var(--color-${sbStatusMap[d.evaluation]})`} as React.CSSProperties}
+								>
+								{d.letter}
+							</Letter>
+						);
+					})}
+				</div>
+			}):""}
+			</div>
+		</Card>
+	);
+}
+
+export function WordleKeyboard({evals=[[{letter:"Q",evaluation:"="}]]}:{evals?:LetterEvaluation[][]}){
+    return <Card className="flex-col flex gap-2 px-2">
+        {evals.map((c,i)=>{
+            return <div className="flex gap-2 justify-center" key={"keyboard-row-"+i}>
+                {i===2 ? <Key className="min-w-14">
+                    <Delete strokeWidth={1}/>
+                </Key>:<></>}
+				{Array.from(c).map((d, j) => {
+					return (
+						<Key
+							key={"keyboard-row-"+i+"col"+j}
+							className={` ${sbStatusMap[d.evaluation as Evaluation]}`}
+							aria-label={`${d} $$ letter status`}>
+							{d.letter}
+						</Key>
+					);
+				})}
+                {i===2 ? <Key className="min-w-14">
+                        <CornerDownLeft strokeWidth={1}/>
+                    </Key>:<></>}
+            </div>
+        })}
+	</Card>
+}
+</file>
+
+<file path="src/app/frontend.tsx">
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./app";
+import { Toaster } from "@/components/ui/sonner"
+
+import "@fontsource-variable/inter/wght.css";
+import "../index.css";
+
+const app = (
+	<StrictMode>
+		<Toaster 
+		position="top-center"
+		/>
+		<App />
+	</StrictMode>
+);
+
+const elem = document.getElementById("root")!;
+(import.meta.hot.data.root ??= createRoot(elem)).render(app);
 </file>
 
 <file path="src/assets/nonwordles.json">
@@ -22336,6 +22794,115 @@ function Button({
 export { Button, buttonVariants };
 </file>
 
+<file path="src/lib/utils.ts">
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+	return twMerge(clsx(inputs));
+}
+</file>
+
+<file path="bun-env.d.ts">
+// Generated by `bun init`
+
+declare module "*.svg" {
+	/**
+	 * A path to the SVG file
+	 */
+	const path: `${string}.svg`;
+	export = path;
+}
+
+declare module "*.css" {}
+
+declare module "*.module.css" {
+	/**
+	 * A record of class names to their corresponding CSS module classes
+	 */
+	const classes: { readonly [key: string]: string };
+	export = classes;
+}
+</file>
+
+<file path="components.json">
+{
+	"$schema": "https://ui.shadcn.com/schema.json",
+	"style": "new-york",
+	"rsc": false,
+	"tsx": true,
+	"tailwind": {
+		"config": "",
+		"css": "styles/globals.css",
+		"baseColor": "neutral",
+		"cssVariables": true,
+		"prefix": ""
+	},
+	"aliases": {
+		"components": "@/components",
+		"utils": "@/lib/utils",
+		"ui": "@/components/ui",
+		"lib": "@/lib",
+		"hooks": "@/hooks"
+	},
+	"iconLibrary": "lucide"
+}
+</file>
+
+<file path="README.md">
+# Wordle Clone
+A wordle clone made in React. This is purely a React practice that I wanted to push out to GitHub. Took me two days, made with 5% AI (Importing Google Fonts in Tailwind and getting Github Pages to work)
+
+# Tech Stack
+- Bun
+- ShadCN
+- React
+- Tailwind
+
+# How to run
+- `bun install`
+- `bun dev`
+</file>
+
+<file path="tsconfig.json">
+{
+	"compilerOptions": {
+		// Environment setup & latest features
+		"lib": ["ESNext", "DOM"],
+		"target": "ESNext",
+		"module": "Preserve",
+		"moduleDetection": "force",
+		"jsx": "react-jsx",
+		"allowJs": true,
+		"types": ["bun", "react"],
+
+		// Bundler mode
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+		"noEmit": true,
+
+		// Best practices
+		"strict": true,
+		"skipLibCheck": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+
+		"paths": {
+			"@/*": ["./src/*"]
+		},
+
+		// Some stricter flags (disabled by default)
+		"noUnusedLocals": false,
+		"noUnusedParameters": false,
+		"noPropertyAccessFromIndexSignature": false
+	},
+
+	"exclude": ["dist", "node_modules"]
+}
+</file>
+
 <file path="src/components/ui/card.tsx">
 import type * as React from "react";
 
@@ -22346,7 +22913,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
 		<div
 			data-slot="card"
 			className={cn(
-				"bg-card text-card-foreground flex flex-col gap-6 rounded-xl border border-border py-6 shadow-sm",
+				"bg-subtle text-card-foreground flex flex-col gap-6 border border-border py-6 shadow-sm",
 				className,
 			)}
 			{...props}
@@ -22431,12 +22998,138 @@ export {
 };
 </file>
 
-<file path="src/lib/utils.ts">
-import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
+<file path="src/index.ts">
+import { serve } from "bun";
+import index from "../index.html";
 
-export function cn(...inputs: ClassValue[]) {
-	return twMerge(clsx(inputs));
+const server = serve({
+	routes: {
+		"/*": index,
+	},
+
+	development: process.env.NODE_ENV !== "production" && {
+		hmr: true,
+		console: true,
+	},
+});
+
+console.log(`${server.url}`);
+</file>
+
+<file path="build.ts">
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import tailwind from "bun-plugin-tailwind";
+
+const outdir = path.join(process.cwd(), "dist");
+await rm(outdir, { recursive: true, force: true });
+
+const result = await Bun.build({
+	entrypoints: ["./index.html"],
+	outdir: "./dist",
+	publicPath: "./",
+	minify: true,
+	plugins: [tailwind],
+	target: "browser",
+	sourcemap: "linked",
+	define: {
+		"process.env.NODE_ENV": JSON.stringify("production"),
+	},
+});
+
+if (!result.success) {
+	console.error("Build failed:");
+	for (const log of result.logs) {
+		console.error(log);
+	}
+	process.exit(1);
+}
+</file>
+
+<file path="package.json">
+{
+	"name": "bun-react-template",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "bun --hot src/index.ts",
+		"build": "bun run build.ts",
+		"start": "NODE_ENV=production bun dist/index.html"
+	},
+	"dependencies": {
+		"@fontsource-variable/inter": "^5.3.0",
+		"@radix-ui/react-label": "^2.1.7",
+		"@radix-ui/react-select": "^2.2.6",
+		"@radix-ui/react-slot": "^1.2.3",
+		"biome": "^0.3.3",
+		"bun-plugin-tailwind": "^0.1.2",
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"eslint": "^10.8.1",
+		"eslint-plugin-unicorn": "^73.0.0",
+		"lucide-react": "^1",
+		"next-themes": "^0.4.6",
+		"react": "^19",
+		"react-dom": "^19",
+		"sonner": "^2.0.8",
+		"tailwind-merge": "^3.3.1",
+		"tw-animate-css": "^1.4.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.9",
+		"@eslint/js": "^10.0.1",
+		"@types/bun": "latest",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"eslint-plugin-react": "^7.37.5",
+		"globals": "^17.11.0",
+		"jiti": "^2.7.0",
+		"tailwindcss": "^4.1.11",
+		"typescript-eslint": "^8.67.0"
+	}
+}
+</file>
+
+<file path="src/app/app.tsx">
+import { RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner"
+import { WordleMain } from "./board";
+
+export function App() {
+	const [displayText, setDisplayText] = useState("");
+	const [pressToggle, setPressToggle] = useState(false);
+
+	const handleRefresh = () => {
+		setPressToggle(true);
+		setTimeout(() => setPressToggle(false), 500);
+		setDisplayText("Resetting..");
+		setTimeout(() => setDisplayText(""), 1000);
+	};
+
+	toast("WORD")
+	return (
+		<>
+			<div className="px-5 gap-5 absolute left-0 top-0 w-full bg-background h-10 flex items-center border-border border">
+				<h1 className="text-2xl font-bold">Wordle</h1>
+				<h2 className="font-light">React Clone of Wordle. Hobby Imitation Project.</h2>
+				<Button variant="link" aria-label="Start a new game" className="ml-auto" onClick={handleRefresh}>
+					{pressToggle ? (
+						<RefreshCw
+							className="animate-better-spin"
+						/>
+					) : (
+						<RefreshCw />
+					)}
+				</Button>
+			</div>
+			<div className="min-w-full min-h-full flex flex-col gap-5">
+				<WordleMain passMessage={(e)=>toast(e)}/>
+			</div>
+		</>
+	);
 }
 </file>
 
@@ -22455,22 +23148,27 @@ export function cn(...inputs: ClassValue[]) {
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  
   --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
   
+  --color-subtle: #f5eadc;
+  --color-correct: #677E61;
+  --color-included: #d99e59;
+  --color-notincluded: #e0d4c3;
+
   --animate-better-spin : better-spin 0.5s ease-out;
+  --animate-pop-in: pop-in 0.2s ease-out;
+  --animate-shake: shake 0.2s ease-out;
+  --animate-flip-reveal: flip-reveal 0.7s both;
 
   @keyframes better-spin {
     0%{
       transform: rotate(0deg);
     };
     100%{
-      transform: rotate(180deg);
+      transform: rotate(360deg);
     };
   }
-
-  --animate-pop-in: pop-in 0.2s ease-out;
-
+  
   @keyframes pop-in {
     0% {
       scale: 110%;
@@ -22482,17 +23180,6 @@ export function cn(...inputs: ClassValue[]) {
     }
   };
 
-  --animate-flip-reveal: flip-reveal 0.3s ease-out;
-  @keyframes flip-reveal {
-    0% {
-      transform: scaleY(0);
-    }
-    100% {
-      transform: scaleY(1);
-    }
-  };
-
-  --animate-shake: shake 0.2s ease-out;
   @keyframes shake {
     0% {
       transform: translateX(0);
@@ -22508,10 +23195,26 @@ export function cn(...inputs: ClassValue[]) {
     }
   };
 
-  --color-subtle: #f5eadc;
-  --color-correct: #677E61;
-  --color-wrong: #d99e59;
-  --color-done: #e0d4c3;
+  @keyframes flip-reveal {
+    0% {
+      background-color: var(--color-background);
+      transform: scaleY(1);
+    }
+    50% {
+      background-color: var(--color-background);
+      transform: scaleY(0);
+    }
+    50% {
+      background-color: var(--color-background);
+    }
+    51% {
+      background-color: var(--reveal-color);
+    }
+    100% {
+      background-color: var(--reveal-color);
+      transform: scaleY(1);
+    }
+  };
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -22624,545 +23327,6 @@ export function cn(...inputs: ClassValue[]) {
     @apply font-sans grid place-items-center min-w-[320px] min-h-screen relative m-0 bg-background text-foreground;
   }
 }
-</file>
-
-<file path="src/index.ts">
-import { serve } from "bun";
-import index from "./index.html";
-
-const server = serve({
-	routes: {
-		"/*": index,
-	},
-
-	development: process.env.NODE_ENV !== "production" && {
-		hmr: true,
-		console: true,
-	},
-});
-
-console.log(`${server.url}`);
-</file>
-
-<file path="bun-env.d.ts">
-// Generated by `bun init`
-
-declare module "*.svg" {
-	/**
-	 * A path to the SVG file
-	 */
-	const path: `${string}.svg`;
-	export = path;
-}
-
-declare module "*.css" {}
-
-declare module "*.module.css" {
-	/**
-	 * A record of class names to their corresponding CSS module classes
-	 */
-	const classes: { readonly [key: string]: string };
-	export = classes;
-}
-</file>
-
-<file path="components.json">
-{
-	"$schema": "https://ui.shadcn.com/schema.json",
-	"style": "new-york",
-	"rsc": false,
-	"tsx": true,
-	"tailwind": {
-		"config": "",
-		"css": "styles/globals.css",
-		"baseColor": "neutral",
-		"cssVariables": true,
-		"prefix": ""
-	},
-	"aliases": {
-		"components": "@/components",
-		"utils": "@/lib/utils",
-		"ui": "@/components/ui",
-		"lib": "@/lib",
-		"hooks": "@/hooks"
-	},
-	"iconLibrary": "lucide"
-}
-</file>
-
-<file path="tsconfig.json">
-{
-	"compilerOptions": {
-		// Environment setup & latest features
-		"lib": ["ESNext", "DOM"],
-		"target": "ESNext",
-		"module": "Preserve",
-		"moduleDetection": "force",
-		"jsx": "react-jsx",
-		"allowJs": true,
-		"types": ["bun", "react"],
-
-		// Bundler mode
-		"moduleResolution": "bundler",
-		"allowImportingTsExtensions": true,
-		"verbatimModuleSyntax": true,
-		"noEmit": true,
-
-		// Best practices
-		"strict": true,
-		"skipLibCheck": true,
-		"noFallthroughCasesInSwitch": true,
-		"noUncheckedIndexedAccess": true,
-		"noImplicitOverride": true,
-
-		"paths": {
-			"@/*": ["./src/*"]
-		},
-
-		// Some stricter flags (disabled by default)
-		"noUnusedLocals": false,
-		"noUnusedParameters": false,
-		"noPropertyAccessFromIndexSignature": false
-	},
-
-	"exclude": ["dist", "node_modules"]
-}
-</file>
-
-<file path="src/app/app.tsx">
-import { RefreshCw } from "lucide-react";
-import React, { useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardAction,
-	CardContent,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
-import { LetterBoard, PseudoBoard } from "./wordle-utils";
-
-export function App() {
-	const [displayText, setDisplayText] = useState("");
-	const [pressToggle, setPressToggle] = useState(false);
-
-	const handleRefresh = () => {
-		setPressToggle(true);
-		setTimeout(() => setPressToggle(false), 500);
-		setDisplayText("Resetting..");
-		setTimeout(() => setDisplayText(""), 1000);
-	};
-
-	return (
-		<>
-			<div className="absolute left-0 top-5 min-w-full max-h-[90%]">
-				<Card
-					className={
-						(displayText ? "opacity-100 " : "opacity-0 ") +
-						"bg-subtle mx-auto p-2 w-fit uppercase"
-					}
-				>
-					<CardTitle>{displayText}</CardTitle>
-				</Card>
-			</div>
-			<div className="min-w-full min-h-full">
-				<Card className="mx-auto my-auto bg-subtle w-600 max-w-sm">
-					<CardHeader>
-						<CardTitle>Wordle</CardTitle>
-						<CardDescription className="w-3/4">
-							React Clone of Wordle. Hobby Imitation Project.
-						</CardDescription>
-						<CardAction>
-							<Button variant="link" onClick={handleRefresh}>
-								{pressToggle ? (
-									<RefreshCw
-										className="animate-better-spin"
-										aria-label="Start a new game"
-									/>
-								) : (
-									<RefreshCw />
-								)}
-							</Button>
-						</CardAction>
-					</CardHeader>
-					<CardContent>
-						{!pressToggle ? (
-							<LetterBoard
-								passMessage={(msg) => setDisplayText(msg)}
-							></LetterBoard>
-						) : (
-							<PseudoBoard></PseudoBoard>
-						)}
-					</CardContent>
-					<CardFooter className="flex-col gap-2">
-						{/* Expect keyboard here */}
-					</CardFooter>
-				</Card>
-			</div>
-		</>
-	);
-}
-</file>
-
-<file path="src/app/wordle-utils.tsx">
-import type React from "react";
-import { useEffect, useReducer, useState } from "react";
-// To-do: Give source where you got wordles from
-// import NONWORDLES from "@/assets/nonwordles.json";
-import WORDLES from "@/assets/wordles.json";
-import WORDS from "@/assets/5-letter-words.json";
-
-// Define types
-type LetterStatusType = "Correct" | "Included" | "Not Included" | "Empty";
-
-type State = {
-	type: "type" | "reveal" | "win" | "lose";
-	text: string;
-	guess: string;
-	textPos: number;
-	guessPos: number;
-};
-
-type Action = {
-	type: "appendGuess" | "removeGuessEnd" | "appendText" | "checkDone";
-	value?: string;
-};
-
-// Set constants
-const LETTERS_PER_LINE = 5;
-const GUESSES = 6;
-const TOTAL_LETTERS = GUESSES * LETTERS_PER_LINE;
-
-// Join Wordles and Nonwordles for the list of words used in validation
-// const WORDS = [...NONWORDLES, ...WORDLES];
-
-// Pick among the 'Wordles' - these are words known to be answers in Wordle
-const ANSWER = WORDLES[Math.floor(Math.random() * WORDLES.length)] ?? "";
-
-// A div used to represent a letter
-export function Letter({
-	className,
-	children,
-	...props
-}: React.ComponentProps<"div">) {
-	return (
-		<div
-			className={`flex h-15 w-full justify-center 
-		items-center text-2xl font-bold font-sans capitalize 
-		${className}`}
-			{...props}
-		>
-			{children}
-		</div>
-	);
-}
-
-// Define the reducer for the useReducer
-function reducer(state: State, action: Action): State {
-	switch (action.type) {
-		case "appendGuess":
-			if (state.type !== "type") return state;
-
-			return {
-				...state,
-				type: "type",
-				guess: state.guess + action.value,
-				guessPos: state.guess.length,
-			};
-
-		case "removeGuessEnd":
-			if (state.type !== "type") return state;
-
-			return { ...state, type: "type", guess: state.guess.slice(0, -1) };
-
-		case "appendText":
-			if (state.type !== "reveal" && state.type !== "type") return state;
-
-			return {
-				...state,
-				type: "reveal",
-				text: state.text + "" + action.value,
-				guess: state.guess.slice(1),
-				textPos: state.textPos + 1,
-			};
-
-		case "checkDone":
-			if (state.type !== "reveal") return state;
-
-			if (action.value === ANSWER)
-				return { ...state, type: "win", guessPos: 0 };
-			else if (state.text.length === TOTAL_LETTERS)
-				return { ...state, type: "lose", guessPos: 0 };
-
-			return { ...state, type: "type" };
-	}
-}
-
-// Render Component
-export function LetterBoard({
-	passMessage,
-}: {
-	passMessage: (msg: string) => void;
-}) {
-	const [state, dispatch] = useReducer(reducer, {
-		type: "type",
-		text: "",
-		guess: "",
-		textPos: 0,
-		guessPos: 0,
-	});
-
-	const [error, setError] = useState(false);
-
-	function appendLetter(evt: KeyboardEvent) {
-		// Ignore keyboard shortcuts
-		if (evt.ctrlKey || evt.metaKey || evt.altKey) return;
-
-		// Match only single characters
-		if (/^[a-zA-Z]$/.test(evt.key)) {
-			evt.preventDefault();
-			dispatch({ type: "appendGuess", value: evt.key.toLowerCase() });
-		}
-	}
-
-	function revealResult(evt: KeyboardEvent) {
-		evt.preventDefault();
-
-		if (
-			state.guess.length === LETTERS_PER_LINE &&
-			WORDS.includes(state.guess)
-		) {
-			const savedGuess = state.guess;
-			let i = 0;
-			
-			const step = () => {
-				dispatch({ type: "appendText", value: savedGuess[i++] });
-
-				if (i === 5) {
-					clearInterval(interval);
-					dispatch({ type: "checkDone", value: savedGuess });
-				}
-			}
-
-			step()
-			const interval = setInterval(step, 500);
-		} else {
-			setError(true);
-			setTimeout(() => setError(false), 100);
-		}
-	}
-
-	useEffect(() => {
-		// Only trigger when the reducer explicitly updates the state to win/lose
-		if (state.type === "win" || state.type === "lose") {
-			passMessage(ANSWER);
-		}
-	}, [state.type, ANSWER]); // Runs whenever state.type changes
-
-	useEffect(() => {
-		function handleKeyDown(evt: KeyboardEvent) {
-			if (evt.key === "Backspace") dispatch({ type: "removeGuessEnd" });
-			else if (evt.key === "Enter") revealResult(evt);
-			else if (state.guess.length < LETTERS_PER_LINE) appendLetter(evt);
-		}
-
-		document.addEventListener("keydown", handleKeyDown);
-
-		return () => {
-			document.removeEventListener("keydown", handleKeyDown);
-		};
-	}, [state, error, state.guess.length]);
-
-	const bgStatusMap: Record<LetterStatusType, string> = {
-		Correct: "bg-correct",
-		Included: "bg-wrong",
-		"Not Included": "bg-done",
-		Empty: "bg-background",
-	};
-
-	return (
-		<div className="grid grid-cols-5 gap-2">
-			{/* Render existing placed letters */}
-			{Array.from(state.text).map((c, i) => {
-				let letterStatus: LetterStatusType;
-
-				// If character c matches corresponding char in ANSWER
-				if (c === ANSWER[i % LETTERS_PER_LINE]) letterStatus = "Correct";
-				// Else, if character c is in ANSWER
-				else if (ANSWER.includes(c)) letterStatus = "Included";
-				// Else character isn't even included
-				else letterStatus = "Not Included";
-
-				return (
-					<Letter
-						key={i}
-						className={`animate-flip-reveal ${bgStatusMap[letterStatus]}`}
-						aria-label={`${c} ${letterStatus}`}
-					>
-						{c}
-					</Letter>
-				);
-			})}
-
-			{/* Render user's current unsubmitted input */}
-			{Array.from(state.guess).map((c, i) => {
-				return (
-					<Letter
-						key={state.guessPos + i}
-						className={`
-          ${error ? "animate-shake " : state.guessPos === i ? "animate-pop-in " : ""}
-          ${bgStatusMap["Empty"]}`}
-						aria-label={`${c} Inputted`}
-					>
-						{c}
-					</Letter>
-				);
-			})}
-
-			{/* Render all empty spaces */}
-			{Array.from(
-				{ length: TOTAL_LETTERS - state.guess.length - state.text.length },
-				(_, i) => (
-					<Letter key={i} className="bg-background" />
-				),
-			)}
-		</div>
-	);
-}
-
-export function PseudoBoard() {
-	return (
-		<div className="grid grid-cols-5 gap-2">
-			{Array.from({ length: TOTAL_LETTERS }, (_, i) => (
-				<Letter key={i} className="bg-background" />
-			))}
-		</div>
-	);
-}
-</file>
-
-<file path="package.json">
-{
-	"name": "bun-react-template",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"dev": "bun --hot src/index.ts",
-		"build": "bun run build.ts",
-		"start": "NODE_ENV=production bun dist/index.html"
-	},
-	"dependencies": {
-		"@fontsource-variable/inter": "^5.3.0",
-		"@radix-ui/react-label": "^2.1.7",
-		"@radix-ui/react-select": "^2.2.6",
-		"@radix-ui/react-slot": "^1.2.3",
-		"biome": "^0.3.3",
-		"bun-plugin-tailwind": "^0.1.2",
-		"class-variance-authority": "^0.7.1",
-		"clsx": "^2.1.1",
-		"eslint": "^10.8.1",
-		"eslint-plugin-unicorn": "^73.0.0",
-		"lucide-react": "^1",
-		"react": "^19",
-		"react-dom": "^19",
-		"tailwind-merge": "^3.3.1",
-		"tw-animate-css": "^1.4.0"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "2.5.9",
-		"@eslint/js": "^10.0.1",
-		"@types/bun": "latest",
-		"@types/react": "^19",
-		"@types/react-dom": "^19",
-		"eslint-plugin-react": "^7.37.5",
-		"globals": "^17.11.0",
-		"jiti": "^2.7.0",
-		"tailwindcss": "^4.1.11",
-		"typescript-eslint": "^8.67.0"
-	}
-}
-</file>
-
-<file path=".github/workflows/deploy.yml">
-# Simple workflow for deploying static content to GitHub Pages
-name: Deploy static content to Pages
-
-on:
-  # Runs on pushes targeting the default branch
-  push:
-    branches: ['master']
-
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# Sets the GITHUB_TOKEN permissions to allow deployment to GitHub Pages
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-# Allow one concurrent deployment
-concurrency:
-  group: 'pages'
-  cancel-in-progress: true
-
-jobs:
-  # Single deploy job since we're just deploying
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - name: Install dependencies
-        run: bun install
-      - name: Build
-        run: bun run build
-      - name: Debug dist contents
-        run: ls -la ./dist
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './dist'
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-</file>
-
-<file path="build.ts">
-import { rm } from "node:fs/promises";
-import path from "node:path";
-import tailwind from "bun-plugin-tailwind";
-
-const outdir = path.join(process.cwd(), "dist");
-await rm(outdir, { recursive: true, force: true });
-
-
-await Bun.build({
-	entrypoints: ["./index.html"],
-	outdir: "./dist",
-  minify: true,
-	plugins: [tailwind],
-	target: "browser",
-	sourcemap: "linked",
-	naming: {
-		entry: "[name].[ext]",
-	},
-	define: {
-		"process.env.NODE_ENV": JSON.stringify("production"),
-	},
-});
 </file>
 
 </files>
