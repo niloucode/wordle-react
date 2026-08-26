@@ -20,10 +20,6 @@
   --color-notincluded: #e0d4c3;
 
   --animate-better-spin : better-spin 0.5s ease-out;
-  --animate-pop-in: pop-in 0.2s ease-out;
-  --animate-shake: shake 0.2s ease-out;
-  --animate-flip-reveal: flip-reveal 0.7s both;
-
   @keyframes better-spin {
     0%{
       transform: rotate(0deg);
@@ -33,6 +29,7 @@
     };
   }
   
+  --animate-pop-in: pop-in 0.2s ease-out;
   @keyframes pop-in {
     0% {
       scale: 110%;
@@ -44,6 +41,7 @@
     }
   };
 
+  --animate-shake: shake 0.2s ease-out;
   @keyframes shake {
     0% {
       transform: translateX(0);
@@ -59,6 +57,7 @@
     }
   };
 
+  --animate-flip-reveal: flip-reveal 0.7s both;
   @keyframes flip-reveal {
     0% {
       background-color: var(--color-background);
