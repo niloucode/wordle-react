@@ -14,10 +14,6 @@
 @theme {
   --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
   
-  --color-subtle: #f5eadc;
-  --color-correct: #677E61;
-  --color-included: #d99e59;
-  --color-notincluded: #e0d4c3;
 
   --animate-better-spin : better-spin 0.5s ease-out;
   @keyframes better-spin {
@@ -32,7 +28,7 @@
   --animate-pop-in: pop-in 0.2s ease-out;
   @keyframes pop-in {
     0% {
-      scale: 110%;
+      scale: 120%;
       opacity: 25%;
     }
     100% {
@@ -79,6 +75,10 @@
     }
   };
 
+  --color-subtle: var(--subtle);
+  --color-correct: var(--correct);
+  --color-included: var(--included);
+  --color-notincluded: var(--notincluded);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -117,10 +117,14 @@
 }
 
 :root {
+  --subtle: #b8ad9a;
+  --correct: #708558;
+  --included: #d99e59;
+  --notincluded: #e0d4c3;
   --radius: 0.625rem;
-  --background: #FCF6ED;
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --background: #e7ddcd;
+  --foreground: oklch(26.618% 0.03007 90.745);
+  --card: oklch(100% 0.00011 271.152);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
