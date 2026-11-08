@@ -5,7 +5,6 @@ import { toast } from "sonner"
 import { WordleMain } from "./board";
 
 export function App() {
-	const [displayText, setDisplayText] = useState("");
 	const [pressToggle, setPressToggle] = useState(false);
 
 	const handleRefresh = () => {
@@ -20,17 +19,11 @@ export function App() {
 				<h1 className="text-2xl font-bold">Wordle</h1>
 				<h2 className="font-light">React Clone of Wordle. Hobby Imitation Project.</h2>
 				<Button variant="link" aria-label="Start a new game" className="ml-auto" onClick={handleRefresh}>
-					{pressToggle ? (
-						<RefreshCw
-							className="animate-better-spin"
-						/>
-					) : (
-						<RefreshCw />
-					)}
+					<RefreshCw className={pressToggle ? "animate-better-spin" : ""} />
 				</Button>
 			</div>
 			<div className="min-w-full min-h-full items-center flex flex-col gap-5">
-				<WordleMain passMessage={(e)=>toast(e.toUpperCase())}/>
+				<WordleMain passMessage={(e) => toast(e.toUpperCase())} />
 			</div>
 		</>
 	);
