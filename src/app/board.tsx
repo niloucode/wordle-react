@@ -40,10 +40,8 @@ const CELLS = ROWS * COLS;
 const WORDS = [...NONWORDLES, ...WORDLES];
 
 // Pick among the 'Wordles' - these are words known to be answers in Wordle
-// const ANSWER = WORDLES[Math.floor(Math.random() * WORDLES.length)] ?? "";
+const ANSWER = WORDLES[Math.floor(Math.random() * WORDLES.length)] ?? "";
 
-// Development in progress, sample answer for now:
-const ANSWER = "adeiu";
 
 // A div used to represent a letter
 export function Letter({
